@@ -1,4 +1,5 @@
-# the goal of this script is to connect to driftpy using driftpy-sdk and DriftClient
+# the goal of this script is to show an implementation of the driftpy market map
+# it will show all the markets and allow you to select one to inspect
 
 import os
 import asyncio
@@ -123,16 +124,17 @@ async def main():
         )
     )
 
+    print("\nFetching Spot Markets...")
+    await spot_market_map.pre_dump()
+
     # Pre-dump to fetch all markets
     print("\nFetching Perpetual Markets...")
     await perp_market_map.pre_dump()
     
-    print("\nFetching Spot Markets...")
-    await spot_market_map.pre_dump()
     
     # Create a combined list of markets with their type and sort by market index
-    perp_markets = list(perp_market_map.values())
     spot_markets = list(spot_market_map.values())
+    perp_markets = list(perp_market_map.values())
     
     # Create separate lists for spot and perp markets
     spot_market_list = [(m.data.market_index, "S", m, False) for m in spot_markets]
