@@ -1,8 +1,7 @@
-numpy==1.26.2
-pandas==2.1.4
-streamlit==1.42.1
-requests==2.32.3
-python-dotenv==1.0.1
-driftpy==0.8.29
-ipykernel
-jupyter 
+anchorpy>=0.17.1
+python-dotenv>=1.0.0
+driftpy>=0.8.33
+solana>=0.30.2
+solders>=0.19.0
+base58>=2.1.1
+asyncio>=3.4.3
