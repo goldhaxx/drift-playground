@@ -1,3 +1,51 @@
+#!/usr/bin/env python3
+"""
+Drift Protocol Market Explorer
+
+This script provides a comprehensive interface for exploring and inspecting markets on the Drift Protocol.
+It allows users to view and analyze both Perpetual and Spot markets with detailed attribute information.
+
+Features:
+- Lists all available Perpetual and Spot markets
+- Interactive market selection by ID (e.g., 'P0' for Perp markets, 'S1' for Spot markets)
+- Flexible attribute selection:
+  * View all attributes
+  * View basic attributes only
+  * Select specific attributes
+  * Group-based selection
+- Detailed market information including:
+  * Basic market details (name, index, status)
+  * AMM parameters for perpetual markets
+  * Oracle and pricing information
+  * Risk parameters
+  * Insurance fund details
+  * Historical data
+
+Requirements:
+- Python 3.7+
+- Required environment variables:
+  * RPC_URL: Solana RPC endpoint URL
+
+Usage:
+1. Run the script:
+   ```
+   python driftpy-marketmap-details.py
+   ```
+2. Select a market using the format:
+   - 'P0' for Perpetual market index 0
+   - 'S1' for Spot market index 1
+3. Choose attributes to display:
+   - Enter numbers for specific attributes
+   - Type 'all' for all attributes
+   - Type 'basic' for common attributes
+   - Type 'group:amm' for all AMM-related attributes
+
+Notes:
+- The script maintains separate attribute selections for Perpetual and Spot markets
+- You can reuse previous attribute selections for the same market type
+- Market data is fetched in real-time from the Drift Protocol
+"""
+
 # the goal of this script is to show an implementation of the driftpy market map
 # it will show all the markets and allow you to select one to inspect
 
@@ -30,19 +78,55 @@ connection = AsyncClient(os.environ.get('RPC_URL'))
 drift_client = DriftClient(connection, wallet)
 
 def format_market_name(name_bytes):
-    """Convert market name bytes to string"""
+    """
+    Convert market name bytes to a human-readable string.
+    
+    Args:
+        name_bytes (List[int]): List of bytes representing the market name
+        
+    Returns:
+        str: Decoded and stripped market name string
+    """
     return bytes(name_bytes).decode('utf-8').strip()
 
 def format_pubkey(pubkey):
-    """Format pubkey for display"""
+    """
+    Format public key for display by truncating with ellipsis.
+    
+    Args:
+        pubkey (str): Full public key string
+        
+    Returns:
+        str: Truncated public key with ellipsis (e.g., "ABC...XYZ")
+    """
     return str(pubkey)[:20] + "..."
 
 def format_number(number, decimals=6):
-    """Format large numbers for better readability"""
+    """
+    Format large numbers for better readability with proper decimal precision.
+    
+    Args:
+        number (int): Raw number to format (usually in base units)
+        decimals (int, optional): Number of decimal places to use. Defaults to 6.
+        
+    Returns:
+        str: Formatted number string with commas and proper decimal places
+    """
     return f"{number / (10 ** decimals):,.6f}"
 
 def get_perp_market_attributes():
-    """Get all available attributes for perpetual markets"""
+    """
+    Get all available attributes for perpetual markets.
+    
+    This function returns a comprehensive list of attribute paths that can be accessed
+    on a PerpMarketAccount object. The attributes are organized into categories:
+    - Base attributes (market details, status, risk parameters)
+    - AMM attributes (oracle, reserves, funding rates)
+    - Insurance claim attributes
+    
+    Returns:
+        List[str]: List of attribute paths that can be accessed on a PerpMarketAccount
+    """
     # Base attributes directly on PerpMarketAccount
     base_attrs = [
         "pubkey", "market_index", "name",
@@ -75,7 +159,19 @@ def get_perp_market_attributes():
     return base_attrs + amm_attrs + insurance_attrs
 
 def get_spot_market_attributes():
-    """Get all available attributes for spot markets"""
+    """
+    Get all available attributes for spot markets.
+    
+    This function returns a comprehensive list of attribute paths that can be accessed
+    on a SpotMarketAccount object. The attributes are organized into categories:
+    - Base attributes (market details, status, risk parameters)
+    - Interest rate attributes
+    - Historical oracle data attributes
+    - Insurance fund attributes
+    
+    Returns:
+        List[str]: List of attribute paths that can be accessed on a SpotMarketAccount
+    """
     # Base attributes directly on SpotMarketAccount
     base_attrs = [
         "pubkey", "oracle", "mint", "vault", "name", "market_index",
@@ -110,7 +206,24 @@ def get_spot_market_attributes():
     return base_attrs + interest_attrs + oracle_attrs + insurance_attrs
 
 def display_nested_attribute(obj, attr_path, indent=0):
-    """Display a nested attribute value with proper formatting"""
+    """
+    Display a nested attribute value with proper formatting based on its type and context.
+    
+    This function handles various types of attributes including:
+    - Market names (byte arrays)
+    - Public keys (truncated display)
+    - Numeric values (proper decimal formatting)
+    - Enum values (class name display)
+    - Nested object attributes
+    
+    Args:
+        obj: The object containing the attribute
+        attr_path (str): Dot-notation path to the attribute (e.g., "amm.base_asset_reserve")
+        indent (int, optional): Number of spaces to indent the output. Defaults to 0.
+        
+    Returns:
+        str: Formatted string representation of the attribute and its value
+    """
     parts = attr_path.split('.')
     current = obj
     
@@ -162,7 +275,21 @@ def display_nested_attribute(obj, attr_path, indent=0):
     return f"{' ' * indent}{attr_path}: {value}"
 
 def select_attributes(all_attributes):
-    """Allow the user to select which attributes to display"""
+    """
+    Interactive interface for selecting which attributes to display.
+    
+    This function provides several selection methods:
+    1. Individual selection: Enter specific numbers (e.g., "1,3,5")
+    2. All attributes: Enter "all"
+    3. Basic attributes: Enter "basic" for commonly used attributes
+    4. Group selection: Enter "group:name" to select all attributes in a group
+    
+    Args:
+        all_attributes (List[str]): Complete list of available attributes
+        
+    Returns:
+        List[str]: Selected attribute paths to display
+    """
     print("\nAvailable attributes:")
     
     # Group attributes for easier selection
@@ -224,7 +351,19 @@ def select_attributes(all_attributes):
         return select_attributes('basic')
 
 def print_market_details(market, is_perp, selected_attrs=None):
-    """Print details for a market based on selected attributes"""
+    """
+    Print details for a market based on selected attributes.
+    
+    This function displays market information in a formatted way, handling both
+    perpetual and spot markets. If no attributes are selected, it prompts the
+    user to choose which attributes to display.
+    
+    Args:
+        market: The market object (PerpMarketAccount or SpotMarketAccount)
+        is_perp (bool): True if this is a perpetual market, False if spot
+        selected_attrs (List[str], optional): Pre-selected attributes to display.
+            If None, user will be prompted to select attributes.
+    """
     market_type = "Perpetual" if is_perp else "Spot"
     print(f"\n=== {market_type} Market Details ===")
     
@@ -240,6 +379,21 @@ def print_market_details(market, is_perp, selected_attrs=None):
         print(display_nested_attribute(market.data, attr))
 
 async def main():
+    """
+    Main entry point for the Drift Protocol Market Explorer.
+    
+    This function:
+    1. Initializes market maps for both perpetual and spot markets
+    2. Fetches all available markets from the Drift Protocol
+    3. Provides an interactive interface for:
+       - Viewing available markets
+       - Selecting markets to inspect
+       - Choosing which attributes to display
+    4. Maintains separate attribute selections for perpetual and spot markets
+    
+    The function runs in an infinite loop until the user chooses to exit by
+    entering 'exit' when prompted for market selection.
+    """
     # Create MarketMaps for both perpetual and spot markets
     perp_market_map = MarketMap(
         MarketMapConfig(
@@ -355,9 +509,31 @@ async def main():
             print(f"Error: {str(e)}")
             break
 
-# This is the entry point of the script. It ensures that the main() coroutine
-# is only executed when the script is run directly (not when imported as a module).
 if __name__ == "__main__":
+    """
+    Script entry point.
+    
+    This script provides an interactive interface to explore Drift Protocol markets.
+    When run directly, it:
+    1. Sets up the necessary client connections
+    2. Fetches all available markets
+    3. Provides an interactive prompt for market exploration
+    
+    Environment Variables Required:
+    - RPC_URL: Solana RPC endpoint URL
+    
+    Example Usage:
+    ```bash
+    # Set up environment
+    export RPC_URL="https://your-rpc-endpoint.com"
+    
+    # Run the script
+    python driftpy-marketmap-details.py
+    ```
+    
+    The script will continue running until the user enters 'exit' at the market
+    selection prompt or encounters an error.
+    """
     # asyncio.run() creates a new event loop, runs the main() coroutine until it completes,
     # and then closes the event loop.
     asyncio.run(main())
