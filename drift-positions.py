@@ -136,7 +136,8 @@ class DriftPositionViewer:
         self.wallet = Wallet(kp)
         self.connection = connection
         
-        # Initialize with dummy wallet and cached subscription for pickle compatibility
+        # Initialize DriftClient with cached subscription mode (no RPC calls yet)
+        # The DriftClient is initialized but not subscribed until needed
         self.drift_client = DriftClient(
             connection, 
             self.wallet, 
@@ -159,11 +160,8 @@ class DriftPositionViewer:
     
     async def initialize(self):
         """Initialize the drift client and maps, using pickled data if available and fresh"""
-        # Subscribe to the drift client first
-        await self.drift_client.subscribe()
-        
+        # First check if we have fresh pickle data available
         if not self.force_refresh:
-            # Try to load from pickle if available and fresh
             pickle_files, timestamp = get_newest_pickle_set(self.pickle_dir)
             if pickle_files and timestamp and is_pickle_fresh(timestamp):
                 print(f"Using pickled data from {datetime.datetime.fromtimestamp(timestamp)}")
@@ -175,8 +173,10 @@ class DriftPositionViewer:
                 else:
                     print("Failed to load from pickle, fetching fresh data instead")
         
-        # If we get here, we need fresh data
+        # Only connect to RPC if we couldn't use pickled data
         print("Fetching fresh data from RPC...")
+        # Subscribe to the drift client
+        await self.drift_client.subscribe()
         await self.initialize_fresh()
         await self.save_to_pickle()
     
@@ -227,7 +227,8 @@ class DriftPositionViewer:
     async def load_from_pickle(self, pickle_files: Dict[str, str]) -> bool:
         """Load data from pickle files, returns True if successful, False otherwise"""
         try:
-            # Initialize empty maps first
+            # Note: When using pickle data, we don't need to subscribe to the drift client or any maps
+            # Create the maps but don't subscribe to them
             self.spot_map = MarketMap(
                 MarketMapConfig(
                     self.drift_client.program,
@@ -261,7 +262,8 @@ class DriftPositionViewer:
                 self.perp_map,
             )
             
-            # Load from pickle
+            # Load from pickle - this deserializes the data without requiring RPC calls
+            print("Loading data from pickle without contacting RPC...")
             await self.vat.unpickle(
                 users_filename=pickle_files.get('usermap'),
                 user_stats_filename=pickle_files.get('userstats'),
@@ -294,33 +296,36 @@ class DriftPositionViewer:
     async def cleanup(self):
         """Clean up connections"""
         try:
-            if hasattr(self, 'spot_map') and self.spot_map:
-                try:
-                    await self.spot_map.unsubscribe()
-                except Exception as e:
-                    print(f"Warning: Error unsubscribing from spot_map: {e}")
-            
-            if hasattr(self, 'perp_map') and self.perp_map:
-                try:
-                    await self.perp_map.unsubscribe()
-                except Exception as e:
-                    print(f"Warning: Error unsubscribing from perp_map: {e}")
+            # Only cleanup subscriptions if we weren't using pickled data
+            # (if using pickled data, we never subscribed)
+            if not self.using_pickled_data:
+                if hasattr(self, 'spot_map') and self.spot_map:
+                    try:
+                        await self.spot_map.unsubscribe()
+                    except Exception as e:
+                        print(f"Warning: Error unsubscribing from spot_map: {e}")
                 
-            if self.user_map:
-                try:
-                    await self.user_map.unsubscribe()
-                except Exception as e:
-                    print(f"Warning: Error unsubscribing from user_map: {e}")
-                
-            if hasattr(self, 'stats_map') and self.stats_map:
-                try:
-                    if hasattr(self.stats_map, 'account_subscriber') and self.stats_map.account_subscriber:
-                        if hasattr(self.stats_map.account_subscriber, 'unsubscribe'):
-                            await self.stats_map.account_subscriber.unsubscribe()
-                except Exception as e:
-                    print(f"Warning: Error unsubscribing from stats_map: {e}")
-                
-            await self.drift_client.unsubscribe()
+                if hasattr(self, 'perp_map') and self.perp_map:
+                    try:
+                        await self.perp_map.unsubscribe()
+                    except Exception as e:
+                        print(f"Warning: Error unsubscribing from perp_map: {e}")
+                    
+                if self.user_map:
+                    try:
+                        await self.user_map.unsubscribe()
+                    except Exception as e:
+                        print(f"Warning: Error unsubscribing from user_map: {e}")
+                    
+                if hasattr(self, 'stats_map') and self.stats_map:
+                    try:
+                        if hasattr(self.stats_map, 'account_subscriber') and self.stats_map.account_subscriber:
+                            if hasattr(self.stats_map.account_subscriber, 'unsubscribe'):
+                                await self.stats_map.account_subscriber.unsubscribe()
+                    except Exception as e:
+                        print(f"Warning: Error unsubscribing from stats_map: {e}")
+                    
+                await self.drift_client.unsubscribe()
         except Exception as e:
             print(f"Warning: Error during cleanup: {e}")
     
