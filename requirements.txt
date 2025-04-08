@@ -1,7 +1,7 @@
-anchorpy>=0.17.1
-python-dotenv>=1.0.0
 driftpy>=0.8.33
-solana>=0.30.2
+anchorpy>=0.17.1
 solders>=0.19.0
+solana>=0.30.2
+python-dotenv>=1.0.0
 base58>=2.1.1
 asyncio>=3.4.3
