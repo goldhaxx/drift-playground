@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Drift Protocol User Positions Viewer
+Drift Protocol Position Aggregator
 
-This script displays all positions for a given Drift Protocol authority address.
-It leverages the drift-labs/driftpy SDK to fetch and display positions with minimal RPC calls.
-Uses VAT (vat of pickles) to cache on-chain data and reduce RPC calls.
+This script displays aggregated positions across all users in the Drift Protocol.
+It leverages the drift-labs/driftpy SDK to fetch and display total notional value
+of all positions in the system, grouped by market.
 
 The script maintains only a single VAT directory for caching data. When a new VAT is created,
 all previous VAT directories are automatically deleted to save disk space.
 
 Usage:
-    python drift-positions.py <AUTHORITY_ADDRESS> [--rpc <RPC_URL>] [--force-refresh] [--pickle-dir <DIRECTORY>]
+    python drift-positions-aggregate.py [--rpc <RPC_URL>] [--force-refresh] [--pickle-dir <DIRECTORY>]
 
 Requirements:
     - Python 3.7+
@@ -32,6 +32,7 @@ import time
 import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
+from collections import defaultdict
 
 from anchorpy import Wallet
 from dotenv import load_dotenv
@@ -127,8 +128,8 @@ def is_pickle_fresh(timestamp: float, max_age_seconds: int = 3600) -> bool:
     age = current_time - timestamp
     return age < max_age_seconds
 
-class DriftPositionViewer:
-    """Class for fetching and displaying Drift positions"""
+class DriftPositionAggregator:
+    """Class for fetching and aggregating all Drift positions"""
     
     def __init__(self, connection, pickle_dir: str = DEFAULT_PICKLE_DIR, force_refresh: bool = False):
         """Initialize with connection and pickle settings"""
@@ -139,7 +140,6 @@ class DriftPositionViewer:
         self.connection = connection
         
         # Initialize DriftClient with cached subscription mode (no RPC calls yet)
-        # The DriftClient is initialized but not subscribed until needed
         self.drift_client = DriftClient(
             connection, 
             self.wallet, 
@@ -159,7 +159,7 @@ class DriftPositionViewer:
         # Create pickle directory if it doesn't exist
         if not os.path.exists(self.pickle_dir):
             os.makedirs(self.pickle_dir)
-    
+
     async def initialize(self):
         """Initialize the drift client and maps, using pickled data if available and fresh"""
         # First check if we have fresh pickle data available
@@ -181,7 +181,7 @@ class DriftPositionViewer:
         await self.drift_client.subscribe()
         await self.initialize_fresh()
         await self.save_to_pickle()
-    
+
     async def initialize_fresh(self):
         """Initialize with fresh data from RPC"""
         # Initialize all the maps we need
@@ -225,7 +225,7 @@ class DriftPositionViewer:
             self.user_map.subscribe(),
             self.stats_map.subscribe(),
         )
-    
+
     async def load_from_pickle(self, pickle_files: Dict[str, str]) -> bool:
         """Load data from pickle files, returns True if successful, False otherwise"""
         try:
@@ -278,7 +278,7 @@ class DriftPositionViewer:
         except Exception as e:
             print(f"Error loading from pickle: {str(e)}")
             return False
-    
+
     async def save_to_pickle(self):
         """Save current state to pickle files"""
         if not self.vat:
@@ -298,7 +298,7 @@ class DriftPositionViewer:
         self._delete_old_vat_dirs(except_dir=folder_name)
         
         return pickle_files
-    
+
     def _delete_old_vat_dirs(self, except_dir=None):
         """Delete all VAT directories except the one specified"""
         if not os.path.exists(self.pickle_dir):
@@ -313,7 +313,7 @@ class DriftPositionViewer:
                     print(f"Deleted old VAT directory: {item}")
                 except Exception as e:
                     print(f"Warning: Failed to delete old VAT directory {item}: {e}")
-    
+
     async def cleanup(self):
         """Clean up connections"""
         try:
@@ -349,248 +349,190 @@ class DriftPositionViewer:
                 await self.drift_client.unsubscribe()
         except Exception as e:
             print(f"Warning: Error during cleanup: {e}")
-    
-    async def get_user_accounts_by_authority(self, authority_pubkey: Pubkey) -> List[DriftUser]:
-        """Get all user accounts associated with an authority"""
+
+    async def get_all_user_positions(self) -> Dict[str, Any]:
+        """Get aggregated positions for all users in the system"""
         if not self.user_map:
             raise ValueError("UserMap not initialized")
         
-        users = []
+        # Initialize aggregation containers
+        perp_aggregates = defaultdict(lambda: {
+            "market_name": "",
+            "total_long_usd": 0.0,
+            "total_short_usd": 0.0,
+            "total_lp_shares": 0,
+            "current_price": 0.0,
+            "unique_users": set()
+        })
+        
+        spot_aggregates = defaultdict(lambda: {
+            "market_name": "",
+            "total_deposits_native": 0.0,
+            "total_borrows_native": 0.0,
+            "total_deposits_usd": 0.0,
+            "total_borrows_usd": 0.0,
+            "token_price": 0.0,
+            "decimals": 0,
+            "unique_users": set()
+        })
+        
+        total_users = 0
+        total_sub_accounts = 0
+        total_net_value = 0.0
+        
+        # Track unique authorities
+        unique_authorities = set()
         
         # If we're using fresh data, sync first
         if not self.using_pickled_data:
             await self.user_map.sync()
         
-        # Find all accounts with matching authority
+        # Process all users
         for user in self.user_map.values():
             try:
-                user_authority = user.get_user_account().authority
-                if str(user_authority) == str(authority_pubkey):
-                    users.append(user)
+                user_account = user.get_user_account()
+                authority = str(user_account.authority)
+                unique_authorities.add(authority)
+                total_sub_accounts += 1
+                total_net_value += user.get_net_usd_value() / 1e6
+                
+                # Process perpetual positions
+                perp_positions = user.get_active_perp_positions()
+                for position in perp_positions:
+                    market = self.drift_client.get_perp_market_account(position.market_index)
+                    market_name = bytes(market.name).decode('utf-8').strip('\x00')
+                    oracle_price_data = user.get_oracle_data_for_perp_market(position.market_index)
+                    
+                    agg = perp_aggregates[position.market_index]
+                    agg["market_name"] = market_name
+                    agg["current_price"] = oracle_price_data.price / 1e6
+                    
+                    position_value = abs(user.get_perp_position_value(
+                        position.market_index,
+                        oracle_price_data,
+                        include_open_orders=True
+                    ) / 1e6)
+                    
+                    base_asset_amount = position.base_asset_amount / 1e9
+                    if base_asset_amount > 0:
+                        agg["total_long_usd"] += position_value
+                    else:
+                        agg["total_short_usd"] += position_value
+                    
+                    agg["total_lp_shares"] += position.lp_shares / 1e9
+                    agg["unique_users"].add(authority)
+                
+                # Process spot positions
+                spot_positions = user.get_active_spot_positions()
+                for position in spot_positions:
+                    market = self.drift_client.get_spot_market_account(position.market_index)
+                    market_name = bytes(market.name).decode('utf-8').strip('\x00')
+                    
+                    agg = spot_aggregates[position.market_index]
+                    agg["market_name"] = market_name
+                    agg["decimals"] = market.decimals
+                    
+                    token_amount = user.get_token_amount(position.market_index)
+                    formatted_amount = token_amount / (10 ** market.decimals)
+                    
+                    if position.market_index == QUOTE_SPOT_MARKET_INDEX:
+                        token_price = 1.0
+                        token_value = abs(formatted_amount)
+                    else:
+                        oracle_price_data = user.get_oracle_data_for_spot_market(position.market_index)
+                        token_price = oracle_price_data.price / 1e6
+                        if token_amount < 0:
+                            token_value = abs(user.get_spot_market_liability_value(
+                                market_index=position.market_index,
+                                include_open_orders=True
+                            ) / 1e6)
+                        else:
+                            token_value = abs(user.get_spot_market_asset_value(
+                                market_index=position.market_index,
+                                include_open_orders=True
+                            ) / 1e6)
+                    
+                    agg["token_price"] = token_price
+                    
+                    if token_amount > 0:
+                        agg["total_deposits_native"] += formatted_amount
+                        agg["total_deposits_usd"] += token_value
+                    else:
+                        agg["total_borrows_native"] += abs(formatted_amount)
+                        agg["total_borrows_usd"] += token_value
+                    
+                    agg["unique_users"].add(authority)
+                    
             except Exception as e:
-                print(f"Error checking user authority: {e}")
+                print(f"Error processing user: {e}")
         
-        return users
-    
-    def get_perp_position_details(self, user: DriftUser, position: PerpPosition) -> Dict[str, Any]:
-        """Get detailed information about a perpetual position"""
-        # Get market information
-        market = self.drift_client.get_perp_market_account(position.market_index)
-        oracle_price_data = user.get_oracle_data_for_perp_market(position.market_index)
-        
-        # Decode market name from bytes
-        market_name = bytes(market.name).decode('utf-8').strip('\x00')
-        
-        # Calculate base asset amount (position size) with precision adjustment
-        base_asset_amount = position.base_asset_amount / 1e9  # BASE_PRECISION
-        
-        # Get position value in USD
-        position_value = user.get_perp_position_value(
-            position.market_index, 
-            oracle_price_data,
-            include_open_orders=True
-        ) / 1e6  # QUOTE_PRECISION
-        
-        # Get current oracle price
-        current_price = oracle_price_data.price / 1e6  # Convert to USD
-        
-        # Calculate entry price if possible
-        entry_price = None
-        if position.base_asset_amount != 0:
-            entry_price = abs(position.quote_entry_amount / position.base_asset_amount * 1e9) / 1e6
-        
-        # Calculate unrealized PnL
-        unrealized_pnl = user.get_unrealized_pnl(
-            with_funding=False,
-            market_index=position.market_index
-        ) / 1e6  # QUOTE_PRECISION
-        
-        # Calculate funding PnL
-        funding_pnl = user.get_unrealized_funding_pnl(
-            market_index=position.market_index
-        ) / 1e6  # QUOTE_PRECISION
-        
-        # Get LP information
-        lp_shares = position.lp_shares / 1e9 if position.lp_shares != 0 else 0
+        # Convert sets to counts for JSON serialization
+        for agg in perp_aggregates.values():
+            agg["unique_users"] = len(agg["unique_users"])
+        for agg in spot_aggregates.values():
+            agg["unique_users"] = len(agg["unique_users"])
         
         return {
-            "market_index": position.market_index,
-            "market_name": market_name,
-            "position_type": "Long" if base_asset_amount > 0 else "Short",
-            "position_size": base_asset_amount,
-            "position_value": position_value,
-            "current_price": current_price,
-            "entry_price": entry_price,
-            "unrealized_pnl": unrealized_pnl,
-            "funding_pnl": funding_pnl,
-            "lp_shares": lp_shares
-        }
-    
-    def get_spot_position_details(self, user: DriftUser, position: SpotPosition) -> Dict[str, Any]:
-        """Get detailed information about a spot market position"""
-        # Get market information
-        market = self.drift_client.get_spot_market_account(position.market_index)
-        oracle_price_data = user.get_oracle_data_for_spot_market(position.market_index)
-        
-        # Decode market name from bytes
-        market_name = bytes(market.name).decode('utf-8').strip('\x00')
-        
-        # Get token amount with proper sign (positive for deposits, negative for borrows)
-        token_amount = user.get_token_amount(position.market_index)
-        
-        # Convert to human readable format based on decimals
-        decimals = market.decimals
-        formatted_token_amount = token_amount / (10 ** decimals)
-        
-        # Get position type (deposit or borrow)
-        position_type = "Deposit" if token_amount > 0 else "Borrow"
-        
-        # Calculate token value in USD
-        token_value = 0
-        if position.market_index == QUOTE_SPOT_MARKET_INDEX:
-            # For USDC, the value is just the token amount
-            token_value = abs(formatted_token_amount)
-            token_price = 1.0  # USDC price is 1:1 with USD
-        else:
-            # For other tokens, calculate USD value and get token price
-            token_price = oracle_price_data.price / 1e6  # Convert to USD
-            
-            if token_amount < 0:
-                liability_value = user.get_spot_market_liability_value(
-                    market_index=position.market_index,
-                    include_open_orders=True
-                ) / 1e6  # QUOTE_PRECISION
-                token_value = liability_value
-            else:
-                asset_value = user.get_spot_market_asset_value(
-                    market_index=position.market_index,
-                    include_open_orders=True
-                ) / 1e6  # QUOTE_PRECISION
-                token_value = asset_value
-        
-        return {
-            "market_index": position.market_index,
-            "market_name": market_name,
-            "position_type": position_type,
-            "token_amount": formatted_token_amount,
-            "token_price": token_price,
-            "token_value": token_value,
-            "decimals": decimals
-        }
-    
-    async def get_user_positions(self, authority_pubkey: str) -> Dict[str, Any]:
-        """Get all positions for the given authority address"""
-        pubkey = Pubkey.from_string(authority_pubkey)
-        users = await self.get_user_accounts_by_authority(pubkey)
-        
-        if not users:
-            return {"error": f"No accounts found for authority: {authority_pubkey}"}
-        
-        result = []
-        
-        for user in users:
-            user_account = user.get_user_account()
-            sub_account = {
-                "sub_account_id": user_account.sub_account_id,
-                "account_health": user.get_health(),
-                "total_collateral": user.get_total_collateral() / 1e6,
-                "free_collateral": user.get_free_collateral() / 1e6,
-                "leverage": user.get_leverage() / 10000,  # Convert from basis points to x format
-                "net_value": user.get_net_usd_value() / 1e6,
-                "perp_positions": [],
-                "spot_positions": []
-            }
-            
-            # Get active perpetual positions
-            perp_positions = user.get_active_perp_positions()
-            for position in perp_positions:
-                position_details = self.get_perp_position_details(user, position)
-                sub_account["perp_positions"].append(position_details)
-            
-            # Get active spot positions
-            spot_positions = user.get_active_spot_positions()
-            for position in spot_positions:
-                position_details = self.get_spot_position_details(user, position)
-                sub_account["spot_positions"].append(position_details)
-            
-            result.append(sub_account)
-        
-        return {
-            "authority": authority_pubkey, 
-            "sub_accounts": result, 
+            "total_unique_authorities": len(unique_authorities),
+            "total_sub_accounts": total_sub_accounts,
+            "total_net_value": total_net_value,
+            "perp_markets": dict(perp_aggregates),
+            "spot_markets": dict(spot_aggregates),
             "using_cached_data": self.using_pickled_data,
             "data_timestamp": self.pickle_timestamp if self.using_pickled_data else time.time()
         }
 
-def print_positions(positions_data: Dict[str, Any]):
+def print_aggregated_positions(data: Dict[str, Any]):
     """
-    Print formatted position information for a user.
+    Print formatted aggregated position information.
     
     Args:
-        positions_data: Dictionary containing user positions and account data
+        data: Dictionary containing aggregated position data
     """
-    if "error" in positions_data:
-        print(positions_data["error"])
-        return
-    
-    print(f"\n=== Positions for Authority: {positions_data['authority']} ===")
-    if positions_data.get("using_cached_data", False):
-        data_time = datetime.datetime.fromtimestamp(positions_data.get("data_timestamp", 0))
+    print("\n=== Drift Protocol Position Aggregation ===")
+    if data.get("using_cached_data", False):
+        data_time = datetime.datetime.fromtimestamp(data.get("data_timestamp", 0))
         print(f"(Using cached data from {data_time})")
-    print(f"Number of Sub-Accounts: {len(positions_data['sub_accounts'])}")
     
-    for i, sub_account in enumerate(positions_data['sub_accounts']):
-        print(f"\n=== Sub-Account {i} (ID: {sub_account['sub_account_id']}) ===")
-        
-        # Print account summary
-        print("\n-- Account Summary --")
-        print(f"Health: {sub_account['account_health']}%")
-        print(f"Total Collateral: ${format_number(sub_account['total_collateral'])}")
-        print(f"Free Collateral: ${format_number(sub_account['free_collateral'])}")
-        print(f"Leverage: {format_number(sub_account['leverage'], 2)}x")
-        print(f"Net Account Value: ${format_number(sub_account['net_value'])}")
-        
-        # Print perpetual positions
-        if sub_account['perp_positions']:
-            print("\n-- Perpetual Positions --")
-            for pos in sub_account['perp_positions']:
-                print(f"\nMarket: {pos['market_name']} (Index: {pos['market_index']})")
-                print(f"Type: {pos['position_type']}")
-                print(f"Size: {format_number(abs(pos['position_size']), 6)}")
-                if pos['entry_price']:
-                    print(f"Entry Price: ${format_number(pos['entry_price'])}")
-                print(f"Current Price: ${format_number(pos['current_price'])}")
-                print(f"Value: ${format_number(abs(pos['position_value']))}")
-                print(f"Unrealized PnL: ${format_number(pos['unrealized_pnl'])}")
-                print(f"Funding PnL: ${format_number(pos['funding_pnl'])}")
-                if pos['lp_shares'] > 0:
-                    print(f"LP Shares: {format_number(pos['lp_shares'])}")
-        else:
-            print("\nNo perpetual positions")
-        
-        # Print spot positions
-        if sub_account['spot_positions']:
-            print("\n-- Spot Positions --")
-            for pos in sub_account['spot_positions']:
-                print(f"\nMarket: {pos['market_name']} (Index: {pos['market_index']})")
-                print(f"Type: {pos['position_type']}")
-                print(f"Amount: {format_number(abs(pos['token_amount']), 6)}")
-                print(f"Price: ${format_number(pos['token_price'])}")
-                print(f"Value: ${format_number(abs(pos['token_value']))}")
-        else:
-            print("\nNo spot positions")
+    print(f"\n-- System Overview --")
+    print(f"Total Unique Authorities: {data['total_unique_authorities']}")
+    print(f"Total Sub-Accounts: {data['total_sub_accounts']}")
+    print(f"Total Net Value: ${format_number(data['total_net_value'])}")
+    
+    # Print perpetual market aggregates
+    print("\n-- Perpetual Markets --")
+    for market_index, market_data in sorted(data['perp_markets'].items()):
+        print(f"\nMarket: {market_data['market_name']} (Index: {market_index})")
+        print(f"Current Price: ${format_number(market_data['current_price'])}")
+        print(f"Total Long Value: ${format_number(market_data['total_long_usd'])}")
+        print(f"Total Short Value: ${format_number(market_data['total_short_usd'])}")
+        print(f"Total Notional: ${format_number(market_data['total_long_usd'] + market_data['total_short_usd'])}")
+        if market_data['total_lp_shares'] > 0:
+            print(f"Total LP Shares: {format_number(market_data['total_lp_shares'])}")
+        print(f"Unique Users: {market_data['unique_users']}")
+    
+    # Print spot market aggregates
+    print("\n-- Spot Markets --")
+    for market_index, market_data in sorted(data['spot_markets'].items()):
+        print(f"\nMarket: {market_data['market_name']} (Index: {market_index})")
+        print(f"Token Price: ${format_number(market_data['token_price'])}")
+        print(f"Total Deposits: {format_number(market_data['total_deposits_native'])} "
+              f"(${format_number(market_data['total_deposits_usd'])})")
+        print(f"Total Borrows: {format_number(market_data['total_borrows_native'])} "
+              f"(${format_number(market_data['total_borrows_usd'])})")
+        print(f"Total Volume: ${format_number(market_data['total_deposits_usd'] + market_data['total_borrows_usd'])}")
+        print(f"Unique Users: {market_data['unique_users']}")
 
 async def main():
     """
-    Main function to process command line arguments and display user positions.
+    Main function to process command line arguments and display aggregated positions.
     """
     parser = argparse.ArgumentParser(
-        description="Display Drift Protocol positions for a given authority address",
+        description="Display aggregated Drift Protocol positions across all users",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
     # Define arguments
-    parser.add_argument("authority", help="Authority public key to query")
     parser.add_argument("--rpc", help="RPC URL (will use RPC_URL env var if not provided)")
     parser.add_argument("--force-refresh", action="store_true", help="Force fetch fresh data from RPC")
     parser.add_argument("--pickle-dir", default=DEFAULT_PICKLE_DIR, help=f"Directory for pickle files (default: {DEFAULT_PICKLE_DIR})")
@@ -607,8 +549,8 @@ async def main():
     # Setup connection
     connection = AsyncClient(rpc_url)
     
-    # Create position viewer with pickle settings
-    viewer = DriftPositionViewer(
+    # Create position aggregator with pickle settings
+    aggregator = DriftPositionAggregator(
         connection, 
         pickle_dir=args.pickle_dir,
         force_refresh=args.force_refresh
@@ -617,11 +559,11 @@ async def main():
     try:
         # Initialize (will use pickles if available and fresh)
         print("Initializing...")
-        await viewer.initialize()
+        await aggregator.initialize()
         
-        # Get and display positions
-        positions_data = await viewer.get_user_positions(args.authority)
-        print_positions(positions_data)
+        # Get and display aggregated positions
+        positions_data = await aggregator.get_all_user_positions()
+        print_aggregated_positions(positions_data)
             
     except Exception as e:
         print(f"Error: {str(e)}")
@@ -630,14 +572,10 @@ async def main():
         return 1
     finally:
         # Clean up
-        await viewer.cleanup()
+        await aggregator.cleanup()
     
     return 0
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python drift-positions.py <AUTHORITY_ADDRESS> [--rpc <RPC_URL>] [--force-refresh] [--pickle-dir <DIRECTORY>]")
-        sys.exit(1)
-    
     exit_code = asyncio.run(main())
     sys.exit(exit_code) 
