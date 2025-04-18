@@ -1,148 +1,86 @@
-# Drift Protocol Position Viewer
+# Drift Protocol Developer Playground
 
-This script allows you to view all positions for a given authority account on the Drift Protocol. It displays both perpetual and spot positions with detailed information including position sizes, values, entry prices, and PnL.
+Welcome to the Drift Protocol Developer Playground! This repository serves as a comprehensive collection of examples, templates, and composable scripts showcasing various ways to interact with Drift Protocol's developer tools and SDKs.
 
-## Features
+## Overview
 
-- Display positions for any Drift authority address
-- Show multiple sub-accounts for the same authority
-- View detailed account health, collateral, and leverage information
-- Display perpetual positions with market details, entry price, current price, and PnL
-- Display spot positions with deposit/borrow details and USD values
-- Show LP (Liquidity Provider) shares if available
-- **Cache on-chain data locally with VAT (vat of pickles)** to reduce RPC calls
-- **Automatically use cached data if less than one hour old**
+This repository aims to help developers quickly get started with building on top of Drift Protocol by providing:
 
-## Requirements
+- Ready-to-use example scripts demonstrating common use cases
+- Templates for different types of integrations
+- Code samples utilizing various Drift SDKs
+- Best practices for interacting with Drift Protocol
 
-- Python 3.7 or higher
-- Required Python packages (install using `pip install -r requirements.txt`):
-  - driftpy
-  - anchorpy
-  - solders
-  - solana
-  - python-dotenv
-  - base58
-  - asyncio
+Currently, the repository primarily focuses on Python-based implementations using `driftpy`, Drift's official Python SDK. We plan to expand this collection to include examples in other languages and frameworks as they become available.
 
-## Installation
-
-1. Clone or download this repository
-2. Install the required packages:
-   ```
-   pip install -r requirements.txt
-   ```
-3. Create a `.env` file with your RPC URL (or use the command line argument):
-   ```
-   RPC_URL=https://your-rpc-endpoint.com
-   ```
-
-## Usage
-
-```bash
-python drift-positions.py <AUTHORITY_ADDRESS> [--rpc <RPC_URL>] [--force-refresh] [--pickle-dir <DIRECTORY>]
-```
-
-### Arguments
-
-- `AUTHORITY_ADDRESS`: The Solana public key of the authority to query (required)
-- `--rpc`: RPC URL to use (optional, will use RPC_URL from .env file if not provided)
-- `--force-refresh`: Force fetch fresh data from RPC even if cached data is available (optional)
-- `--pickle-dir`: Directory to store/load pickle files (default: "pickles")
-
-### Example
-
-```bash
-# Basic usage (will use cached data if available and less than 1 hour old)
-python drift-positions.py FULqR3GHUtHBxjhVHRSg7u1JXvBxQNPZGS9fnhqt8YEk
-
-# Force fresh data from RPC
-python drift-positions.py FULqR3GHUtHBxjhVHRSg7u1JXvBxQNPZGS9fnhqt8YEk --force-refresh
-
-# Use a custom pickle directory
-python drift-positions.py FULqR3GHUtHBxjhVHRSg7u1JXvBxQNPZGS9fnhqt8YEk --pickle-dir my_pickles
-```
-
-## How Caching Works
-
-The script uses a "vat of pickles" (VAT) to store and load cached on-chain data:
-
-1. On first run or when cached data is older than one hour, it:
-   - Fetches fresh data from the RPC provider
-   - Saves this data to timestamped pickle files in the pickle directory
-   - Displays the positions based on this fresh data
-
-2. On subsequent runs, it:
-   - Checks for existing pickle files in the pickle directory
-   - If valid pickle files are found that are less than one hour old, it loads them
-   - Displays positions using the cached data instead of making RPC calls
-   - Indicates in the output that cached data is being used
-
-3. You can force a refresh of the data with the `--force-refresh` flag, which will:
-   - Skip checking for cached data
-   - Always fetch fresh data from the RPC provider
-   - Create new pickle files with the fresh data
-
-This approach significantly reduces the number of RPC calls made to the Solana network.
-
-## Example Output
+## Repository Structure
 
 ```
-=== Positions for Authority: FULqR3GHUtHBxjhVHRSg7u1JXvBxQNPZGS9fnhqt8YEk ===
-(Using cached data)
-Number of Sub-Accounts: 2
-
-=== Sub-Account 0 (ID: 0) ===
-
--- Account Summary --
-Health: 100%
-Total Collateral: $25,000.0000
-Free Collateral: $23,450.2345
-Leverage: 1.50x
-Net Account Value: $24,987.1234
-
--- Perpetual Positions --
-
-Market: SOL-PERP (Index: 1)
-Type: Long
-Size: 10.000000
-Entry Price: $30.5000
-Current Price: $32.6500
-Value: $326.5000
-Unrealized PnL: $21.5000
-Funding PnL: $1.2500
-
-Market: ETH-PERP (Index: 2)
-Type: Short
-Size: 1.500000
-Entry Price: $2,505.0000
-Current Price: $2,498.7500
-Value: $3,748.1250
-Unrealized PnL: $9.3750
-Funding PnL: -$2.2500
-
--- Spot Positions --
-
-Market: USDC (Index: 0)
-Type: Deposit
-Amount: 20,000.000000
-Price: $1.0000
-Value: $20,000.0000
-
-Market: SOL (Index: 1)
-Type: Deposit
-Amount: 150.000000
-Price: $32.6500
-Value: $4,897.5000
+drift-playground/
+├── python/
+│   ├── position-viewer/      # Script to view user positions
+│   ├── market-making/        # Market making bot templates
+│   └── data-analysis/        # Data analysis and visualization tools
+├── typescript/               # (Coming soon)
+└── other-languages/         # (Future implementations)
 ```
 
-## Notes
+## Featured Examples
 
-- Cached data is stored in the `pickles` directory by default (configurable via `--pickle-dir`)
-- Each cache set is stored in a timestamp-named subdirectory (format: `vat-YYYY-MM-DD-HH-MM-SS`)
-- If you have issues with the cached data, try running with `--force-refresh` to get fresh data
-- The script uses a dummy wallet for reading data and doesn't require any signing capabilities
+### Position Viewer
+A comprehensive script for viewing all positions for a given authority account on the Drift Protocol. Features include:
+- Display of perpetual and spot positions
+- Multiple sub-account support
+- Detailed account health metrics
+- Local data caching to reduce RPC calls
+
+[View Position Viewer Documentation](./python/position-viewer/README.md)
+
+## Getting Started
+
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/drift-labs/drift-playground.git
+   cd drift-playground
+   ```
+
+2. Choose an example or template that matches your use case
+
+3. Follow the specific setup instructions in the example's directory
+
+## Prerequisites
+
+Different examples may have different requirements. Generally, you'll need:
+
+- Python 3.7+ for Python examples
+- Node.js for TypeScript examples (coming soon)
+- A Solana RPC endpoint
+- Basic familiarity with Drift Protocol concepts
+
+## Contributing
+
+We welcome contributions! If you have:
+- A useful script or template
+- An improvement to existing examples
+- Ideas for new examples
+- Bug fixes or optimizations
+
+Please feel free to:
+1. Fork the repository
+2. Create a feature branch
+3. Submit a pull request
+
+## Resources
+
+- [Drift Protocol Documentation](https://docs.drift.trade/)
+- [DriftPy SDK Documentation](https://drift-labs.github.io/driftpy/)
+- [Drift Protocol GitHub](https://github.com/drift-labs/protocol-v2)
+- [Community Discord](https://discord.gg/driftprotocol)
 
 ## License
 
-MIT 
+MIT
+
+---
+
+Note: This repository is under active development. New examples and templates are being added regularly. Watch or star the repository to stay updated with new additions. 

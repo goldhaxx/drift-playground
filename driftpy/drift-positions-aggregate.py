@@ -58,7 +58,7 @@ from driftpy.account_subscription_config import AccountSubscriptionConfig
 load_dotenv()
 
 # Default pickle directory
-DEFAULT_PICKLE_DIR = "pickles"
+DEFAULT_PICKLE_DIR = "../pickles"
 
 def format_number(number: float, decimals: int = 4, use_commas: bool = True) -> str:
     """Format a number with proper decimal places and optional comma separators"""
