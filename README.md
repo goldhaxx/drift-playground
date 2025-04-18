@@ -75,7 +75,7 @@ Please feel free to:
 - [Drift Protocol Documentation](https://docs.drift.trade/)
 - [DriftPy SDK Documentation](https://drift-labs.github.io/driftpy/)
 - [Drift Protocol GitHub](https://github.com/drift-labs/protocol-v2)
-- [Community Discord](https://discord.gg/driftprotocol)
+- [Community Discord](https://discord.com/invite/fMcZBH8ErM)
 
 ## License
 
