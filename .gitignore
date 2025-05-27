@@ -4,3 +4,5 @@ __pycache__
 .DS_Store
 pickles/vat-*
 pickles/*.pkl
+*.pkl
+*.csv
