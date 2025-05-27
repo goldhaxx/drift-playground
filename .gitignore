@@ -5,3 +5,4 @@ __pycache__
 pickles/vat-*
 pickles/*.pkl
 *.pkl
+*.csv
