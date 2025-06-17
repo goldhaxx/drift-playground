@@ -6,3 +6,4 @@ pickles/vat-*
 pickles/*.pkl
 *.pkl
 *.csv
+*.xlsx
